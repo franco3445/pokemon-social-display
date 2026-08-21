@@ -1,6 +1,8 @@
-import { socialPanels, paymentPanels } from "../data/panels";
+import { useSocialPanels, paymentPanels } from "../data/panels";
 
 export default function Settings() {
+
+    const socialPanels = useSocialPanels();
 
     return (
         <main className="page settings-page">
@@ -36,7 +38,7 @@ export default function Settings() {
             </span>
 
                         <span>
-              {panel.followers.toLocaleString()}
+              {panel.followers?.toLocaleString() ?? "-"}
                             {" "}
                             followers
             </span>

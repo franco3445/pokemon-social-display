@@ -45,15 +45,7 @@ export async function getAllSocialStats(): Promise<SocialStats[]> {
     return PLATFORMS.map((platform, i) => {
         const result = results[i];
         if (result.status === "rejected") {
-            const message =
-                result.reason instanceof Error ? result.reason.message : String(result.reason);
-
-            // Awaiting the one-time OAuth login is an expected setup state, not a fault.
-            if (message.includes("not linked yet")) {
-                console.info(`${platform}: ${message}`);
-            } else {
-                console.error(`${platform} follower count failed:`, result.reason);
-            }
+            console.error(`${platform} follower count failed:`, result.reason);
             return { platform, followers: 0 };
         }
         return { platform, followers: result.value };

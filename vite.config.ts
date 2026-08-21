@@ -2,13 +2,14 @@ import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-
+import { existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { TikTokClient } from "@ssut/tiktok-api";
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
-const TOKEN_STORE = ".tiktok-token.json";
-const TIKTOK_SCOPES = "user.info.basic,user.info.stats";
+const GRAPH = "https://graph.facebook.com/v21.0";
+const FB_TOKEN_STORE = ".fb-token.json";
+// Long-lived user tokens last ~60 days; re-bootstrap well before that.
+const USER_TOKEN_TTL_MS = 50 * 24 * 60 * 60 * 1000;
 
 const cache = new Map<string, { followers: number; expiresAt: number }>();
 
@@ -28,13 +29,13 @@ function requireEnv(env: Record<string, string>, key: string): string {
 }
 
 /* ------------------------------------------------------------------ *
- * Instagram + Facebook: plain Graph API reads.
+ * Graph API shared read.
  * ------------------------------------------------------------------ */
 
 interface GraphResponse {
   followers_count?: number;
   fan_count?: number;
-  error?: { message?: string };
+  error?: { message?: string; code?: number };
 }
 
 async function graphFollowers(url: string, field: "followers_count" | "fan_count"): Promise<number> {
@@ -53,121 +54,166 @@ async function graphFollowers(url: string, field: "followers_count" | "fan_count
 }
 
 /* ------------------------------------------------------------------ *
- * TikTok: Display API via Login Kit.
+ * Facebook: self-maintaining Page token.
  *
- * The Research API is not usable here: /v2/research/* rejects
- * client_credentials tokens with access_token_invalid unless the app has
- * been approved for research access. The Display API instead needs a
- * one-time user login, after which the refresh token keeps it alive.
+ * A Page token derived from a long-lived user token does not expire, which
+ * is what stops the hourly breakage. FB_ACCESS_TOKEN is therefore only a
+ * seed, read once to bootstrap the Page token that gets cached to disk.
+ * FB_APP_ID and FB_APP_SECRET upgrade the seed to a long-lived user token
+ * first; without them a short-lived seed yields a short-lived Page token.
  * ------------------------------------------------------------------ */
 
-interface TikTokTokenResponse {
+interface FbTokenStore {
+  pageId: string;
+  token: string;
+  // "page" tokens never expire; the "user" fallback does, so it carries a date.
+  kind: "page" | "user";
+  expiresAt: number | null;
+}
+
+interface FbExchangeResponse {
   access_token?: string;
-  refresh_token?: string;
-  expires_in?: number;
-  error?: string;
-  error_description?: string;
+  error?: { message?: string };
 }
 
-interface TikTokUserResponse {
-  data?: { user?: { follower_count?: number } };
-  error?: { code?: string; message?: string };
+interface FbAccountsResponse {
+  data?: Array<{ id?: string; name?: string; access_token?: string }>;
+  error?: { message?: string };
 }
 
-interface StoredToken {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
+function fanCountUrl(pageId: string, token: string): string {
+  return `${GRAPH}/${pageId}?fields=fan_count&access_token=${token}`;
 }
 
-const pendingStates = new Set<string>();
-
-function readToken(): StoredToken | null {
-  if (!existsSync(TOKEN_STORE)) return null;
+function readFbToken(pageId: string): string | null {
+  if (!existsSync(FB_TOKEN_STORE)) return null;
   try {
-    return JSON.parse(readFileSync(TOKEN_STORE, "utf8")) as StoredToken;
+    const stored = JSON.parse(readFileSync(FB_TOKEN_STORE, "utf8")) as FbTokenStore;
+    if (stored.pageId !== pageId) return null;
+    if (stored.expiresAt !== null && stored.expiresAt < Date.now()) return null;
+    return stored.token;
   } catch {
     return null;
   }
 }
 
-function writeToken(token: StoredToken): void {
-  writeFileSync(TOKEN_STORE, JSON.stringify(token, null, 2));
-}
+async function bootstrapFbPageToken(env: Record<string, string>, pageId: string): Promise<string> {
+  const seed = requireEnv(env, "FB_ACCESS_TOKEN");
+  let userToken = seed;
 
-function redirectUri(env: Record<string, string>): string {
-  return env.TIKTOK_REDIRECT_URI || "https://localhost:5173/api/social/tiktok/callback";
-}
+  // Step 1: upgrade the seed to a long-lived (~60 day) user token if we can.
+  if (env.FB_APP_ID && env.FB_APP_SECRET) {
+    const url = new URL(`${GRAPH}/oauth/access_token`);
+    url.searchParams.set("grant_type", "fb_exchange_token");
+    url.searchParams.set("client_id", env.FB_APP_ID);
+    url.searchParams.set("client_secret", env.FB_APP_SECRET);
+    url.searchParams.set("fb_exchange_token", seed);
 
-async function exchange(
-  env: Record<string, string>,
-  params: Record<string, string>,
-): Promise<StoredToken> {
-  const response = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_key: requireEnv(env, "TIKTOK_CLIENT_KEY"),
-      client_secret: requireEnv(env, "TIKTOK_CLIENT_SECRET"),
-      ...params,
-    }),
-  });
+    const response = await fetch(url);
+    const payload = (await response.json()) as FbExchangeResponse;
 
-  const payload = (await response.json()) as TikTokTokenResponse;
+    if (!response.ok || !payload.access_token) {
+      throw new Error(
+        `Facebook token exchange ${response.status}: ` +
+          `${payload.error?.message ?? "no access_token returned"}. ` +
+          `Paste a fresh user token into FB_ACCESS_TOKEN and retry.`,
+      );
+    }
+    userToken = payload.access_token;
+  }
 
-  if (!response.ok || !payload.access_token || !payload.refresh_token) {
+  // Step 2: trade the user token for the Page token, which is the durable one.
+  const accountsUrl = new URL(`${GRAPH}/me/accounts`);
+  accountsUrl.searchParams.set("fields", "id,name,access_token");
+  accountsUrl.searchParams.set("access_token", userToken);
+
+  const response = await fetch(accountsUrl);
+  const payload = (await response.json()) as FbAccountsResponse;
+
+  if (!response.ok || !payload.data) {
     throw new Error(
-      `TikTok token ${response.status}: ` +
-        `${payload.error_description ?? payload.error ?? "no token in response"}`,
+      `Facebook /me/accounts ${response.status}: ${payload.error?.message ?? "no page list returned"}`,
     );
   }
 
-  return {
-    accessToken: payload.access_token,
-    refreshToken: payload.refresh_token,
-    expiresAt: Date.now() + (payload.expires_in ?? 86400) * 1000,
-  };
-}
+  const page = payload.data.find((candidate) => candidate.id === pageId);
 
-async function tiktokAccessToken(env: Record<string, string>): Promise<string> {
-  const stored = readToken();
-  if (!stored) {
-    throw new Error("TikTok is not linked yet. Open /api/social/tiktok/login once to authorize.");
+  // Preferred path: a Page token, which never expires.
+  if (page?.access_token) {
+    const store: FbTokenStore = { pageId, token: page.access_token, kind: "page", expiresAt: null };
+    writeFileSync(FB_TOKEN_STORE, JSON.stringify(store, null, 2));
+    return page.access_token;
   }
 
-  // Access tokens last 24h, refresh tokens a year, so this self-heals.
-  if (stored.expiresAt > Date.now() + 60_000) return stored.accessToken;
+  // Fallback: the Page was not opted in to the app, so no Page token exists for
+  // it. The user token can still read fan_count, it just expires, so cache it
+  // with a date and re-bootstrap later. Opting the Page in upgrades this
+  // automatically on the next bootstrap.
+  const visible = payload.data.map((entry) => `${entry.name} (${entry.id})`).join(", ") || "none";
+  console.warn(
+    `[social-api] No Page token for ${pageId}; falling back to the user token, ` +
+      `which expires. Pages opted in to this app: ${visible}. Re-generate the ` +
+      `token and grant access to this Page for a non-expiring one.`,
+  );
 
-  const refreshed = await exchange(env, {
-    grant_type: "refresh_token",
-    refresh_token: stored.refreshToken,
-  });
-  writeToken(refreshed);
-  return refreshed.accessToken;
+  const store: FbTokenStore = {
+    pageId,
+    token: userToken,
+    kind: "user",
+    expiresAt: Date.now() + USER_TOKEN_TTL_MS,
+  };
+  writeFileSync(FB_TOKEN_STORE, JSON.stringify(store, null, 2));
+  return userToken;
 }
+
+async function facebookFollowers(env: Record<string, string>): Promise<number> {
+  const pageId = requireEnv(env, "FB_PAGE_ID");
+  const stored = readFbToken(pageId);
+
+  if (!stored) {
+    return graphFollowers(fanCountUrl(pageId, await bootstrapFbPageToken(env, pageId)), "fan_count");
+  }
+
+  try {
+    return await graphFollowers(fanCountUrl(pageId, stored), "fan_count");
+  } catch (err) {
+    const message = (err as Error).message;
+
+    // A stored Page token can still be invalidated by a password change or a
+    // revoked app permission. Discard it and bootstrap once from the seed.
+    if (!/expired|session|oauth|token/i.test(message)) throw err;
+
+    rmSync(FB_TOKEN_STORE, { force: true });
+    return graphFollowers(fanCountUrl(pageId, await bootstrapFbPageToken(env, pageId)), "fan_count");
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * TikTok: public profile read via @ssut/tiktok-api.
+ *
+ * This reads the same public data the profile page shows, so it needs no
+ * OAuth, no app review, and no domain verification. The tradeoff is that
+ * it rides an undocumented endpoint: expect it to break without notice,
+ * and keep the cache in front of it to avoid hammering TikTok.
+ * ------------------------------------------------------------------ */
+
+const tiktok = new TikTokClient({ region: "US" });
 
 async function tiktokFollowers(env: Record<string, string>): Promise<number> {
-  const response = await fetch("https://open.tiktokapis.com/v2/user/info/?fields=follower_count", {
-    headers: { Authorization: `Bearer ${await tiktokAccessToken(env)}` },
-  });
+  const username = requireEnv(env, "TIKTOK_USERNAME");
 
-  const payload = (await response.json()) as TikTokUserResponse;
+  const profile = await tiktok.getUser(username);
+  const followers = profile?.data?.userInfo?.stats?.followerCount;
 
-  // TikTok can return HTTP 200 with an error payload.
-  if (!response.ok || (payload.error?.code && payload.error.code !== "ok")) {
-    throw new Error(`TikTok API ${response.status}: ${payload.error?.message ?? "unknown error"}`);
-  }
-
-  const followers = payload.data?.user?.follower_count;
   if (typeof followers !== "number") {
-    throw new Error("No follower_count in TikTok response (is the user.info.stats scope approved?)");
+    throw new Error(`No followerCount for "${username}" (is the profile public and the name exact?)`);
   }
   return followers;
 }
 
 /* ------------------------------------------------------------------ *
- * Routes. Every credential stays in this Node process, and the browser
- * only ever calls same-origin /api/social/*, which is what avoids CORS.
+ * Routes. Credentials stay in this Node process, and the browser only
+ * ever calls same-origin /api/social/*, which is what avoids CORS.
  * ------------------------------------------------------------------ */
 
 function socialApi(env: Record<string, string>): Plugin {
@@ -201,33 +247,8 @@ function socialApi(env: Record<string, string>): Plugin {
 
       server.middlewares.use(
         "/api/social/facebook",
-        json(() =>
-          cached("facebook", () =>
-            graphFollowers(
-              `https://graph.facebook.com/v26.0/${requireEnv(env, "FB_PAGE_ID")}` +
-                `?fields=fan_count&access_token=${requireEnv(env, "FB_ACCESS_TOKEN")}`,
-              "fan_count",
-            ),
-          ),
-        ),
+        json(() => cached("facebook", () => facebookFollowers(env))),
       );
-
-      // Step 1: one-time authorization. Open this URL in a browser.
-      server.middlewares.use("/api/social/tiktok/login", (_req, res) => {
-        const state = randomUUID();
-        pendingStates.add(state);
-
-        const url = new URL("https://www.tiktok.com/v2/auth/authorize/");
-        url.searchParams.set("client_key", requireEnv(env, "TIKTOK_CLIENT_KEY"));
-        url.searchParams.set("scope", TIKTOK_SCOPES);
-        url.searchParams.set("response_type", "code");
-        url.searchParams.set("redirect_uri", redirectUri(env));
-        url.searchParams.set("state", state);
-
-        res.statusCode = 302;
-        res.setHeader("Location", url.toString());
-        res.end();
-      });
 
       server.middlewares.use(
         "/api/social/tiktok",
@@ -244,15 +265,13 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [
       react(),
-      // TikTok rejects an http redirect URI, so DEV_HTTPS=1 serves the dev site
-      // over https for the one-time login. The stored refresh token works over
-      // plain http afterwards, so this can be switched back off.
+      // Local https is no longer required, since nothing needs an OAuth
+      // callback now. Left behind the flag in case a provider demands it.
       ...(env.DEV_HTTPS === "1" ? [basicSsl()] : []),
       socialApi(env),
     ],
     server: {
-      // Only needed if you tunnel instead of using local https; Vite blocks
-      // requests arriving on an unrecognised Host header.
+      // Only needed if you tunnel; Vite blocks unrecognised Host headers.
       allowedHosts: env.DEV_ALLOWED_HOST ? [env.DEV_ALLOWED_HOST] : undefined,
     },
   };

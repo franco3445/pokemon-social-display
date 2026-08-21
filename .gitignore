@@ -26,4 +26,4 @@ dist-ssr
 # Local secrets
 .env
 .env.local
-.tiktok-token.json
+.fb-token.json

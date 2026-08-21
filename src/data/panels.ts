@@ -1,4 +1,5 @@
-import {getAllSocialStats} from "../api/social.ts";
+import { useEffect, useState } from "react";
+import { getAllSocialStats } from "../api/social.ts";
 
 export type SocialPlatform =
     | "facebook"
@@ -14,7 +15,9 @@ export interface SocialPanel {
     type: "social";
     platform: SocialPlatform;
     name: string;
-    followers: number;
+    // Filled in by useSocialPanels once the live counts arrive. Panel hides the
+    // follower row while this is undefined, so there is no placeholder number.
+    followers?: number;
     url: string;
     qrColor: string;
 }
@@ -27,14 +30,11 @@ export interface PaymentPanel {
     qrColor: string;
 }
 
-getAllSocialStats().then(r => r.map(h => console.log(h)));
-
 export const socialPanels: SocialPanel[] = [
     {
         type: "social",
         platform: "facebook",
         name: "Franco's Finds",
-        followers: 12450,
         url: "https://www.facebook.com/profile.php?id=61592897452787",
         qrColor: "#1877f2",
     },
@@ -42,7 +42,6 @@ export const socialPanels: SocialPanel[] = [
         type: "social",
         platform: "instagram",
         name: "@francos_finds",
-        followers: 8721,
         url: "https://www.instagram.com/francos_finds/",
         qrColor: "#e1306c",
     },
@@ -50,11 +49,60 @@ export const socialPanels: SocialPanel[] = [
         type: "social",
         platform: "tiktok",
         name: "@francos_finds",
-        followers: 6340,
         url: "https://www.tiktok.com/@francos_finds",
         qrColor: "#000000",
     },
 ];
+
+// One shared request rather than one per component, since several pages render
+// social panels and would otherwise each trigger their own fetch.
+let inFlight: ReturnType<typeof getAllSocialStats> | null = null;
+
+function loadSocialStats() {
+    inFlight ??= getAllSocialStats();
+    return inFlight;
+}
+
+/**
+ * The panel definitions above with live follower counts merged in by platform.
+ *
+ * getAllSocialStats reports a failed platform as 0, which is left undefined
+ * here so the panel hides its follower row rather than claiming zero.
+ */
+export function useSocialPanels(): SocialPanel[] {
+    const [panels, setPanels] = useState<SocialPanel[]>(socialPanels);
+
+    useEffect(() => {
+        let active = true;
+
+        loadSocialStats()
+            .then((stats) => {
+                if (!active) return;
+
+                const followersByPlatform = new Map(
+                    stats.map((stat) => [stat.platform, stat.followers]),
+                );
+
+                setPanels(
+                    socialPanels.map((panel) => ({
+                        ...panel,
+                        followers: followersByPlatform.get(panel.platform) || undefined,
+                    })),
+                );
+            })
+            .catch((err) => {
+                // getAllSocialStats already swallows per-platform failures, so
+                // reaching here means something broke outright.
+                console.error("social stats request failed:", err);
+            });
+
+        return () => {
+            active = false;
+        };
+    }, []);
+
+    return panels;
+}
 
 export const paymentPanels: PaymentPanel[] = [
     {

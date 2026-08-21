@@ -1,8 +1,10 @@
 import { Link } from "react-router-dom";
-import { socialPanels, paymentPanels } from "../data/panels";
+import { useSocialPanels, paymentPanels } from "../data/panels";
 import Panel from "../components/Panel";
 
 export default function Home() {
+    const socialPanels = useSocialPanels();
+
     return (
         <main className="page">
 

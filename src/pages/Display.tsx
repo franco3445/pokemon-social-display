@@ -1,10 +1,12 @@
 import Panel from "../components/Panel";
 import {
-    socialPanels,
+    useSocialPanels,
     paymentPanels,
 } from "../data/panels";
 
 export default function Display() {
+
+    const socialPanels = useSocialPanels();
 
     const panels = [
         ...socialPanels,
