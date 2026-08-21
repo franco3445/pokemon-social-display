@@ -1,0 +1,38 @@
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+:root {
+  font-family: "Press Start 2P", monospace;
+  color: #ffffff;
+  background: #07111c;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+  width: 100%;
+}
+
+body {
+  background:
+          radial-gradient(
+                  circle at 50% 0%,
+                  #173b59 0%,
+                  #07111c 55%,
+                  #03070b 100%
+          );
+
+  min-height: 100vh;
+}
+
+button,
+a {
+  font-family: inherit;
+}
