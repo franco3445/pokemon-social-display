@@ -1,3 +1,5 @@
+import {getAllSocialStats} from "../api/social.ts";
+
 export type SocialPlatform =
     | "facebook"
     | "instagram"
@@ -24,6 +26,8 @@ export interface PaymentPanel {
     url: string;
     qrColor: string;
 }
+
+getAllSocialStats().then(r => r.map(h => console.log(h)));
 
 export const socialPanels: SocialPanel[] = [
     {
