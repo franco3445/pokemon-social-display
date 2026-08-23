@@ -18,13 +18,6 @@ export default function Display() {
 
             <div className="display-header">
 
-                <div className="display-title">
-                    <span>POKÉDEX</span>
-                    <small>
-                        TRAINER CONNECTION CENTER
-                    </small>
-                </div>
-
                 <div className="display-status">
                     ONLINE ●
                 </div>

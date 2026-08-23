@@ -18,9 +18,9 @@ export default function Home() {
 
                 <div>
                     <h1>
-                        TRAINER
+                        Franco's
                         <br />
-                        CONNECTION
+                        Finds
                     </h1>
 
                     <p>
