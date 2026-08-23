@@ -11,6 +11,7 @@ import { QRCodeSVG } from "qrcode.react";
 
 interface PanelProps {
     followers?: number;
+    likes?: number;
     name: string;
     platform: string;
     qrColor: string;
@@ -57,6 +58,7 @@ export default function Panel({
     platform,
     name,
     followers,
+    likes,
     url,
     type,
     qrColor,
@@ -73,13 +75,29 @@ export default function Panel({
                 {getPlatformName(platform)}
             </h2>
 
-            {type === "social" && followers !== undefined && (
-                <div className="followers">
-                    <strong>
-                        {followers.toLocaleString()}
-                    </strong>
+            {type === "social" && (followers !== undefined || likes !== undefined) && (
+                <div className="panel-stats">
 
-                    <span>FOLLOWERS</span>
+                    {followers !== undefined && (
+                        <div className="followers">
+                            <strong>
+                                {followers.toLocaleString()}
+                            </strong>
+
+                            <span>FOLLOWERS</span>
+                        </div>
+                    )}
+
+                    {likes !== undefined && (
+                        <div className="followers">
+                            <strong>
+                                {likes.toLocaleString()}
+                            </strong>
+
+                            <span>LIKES</span>
+                        </div>
+                    )}
+
                 </div>
             )}
 

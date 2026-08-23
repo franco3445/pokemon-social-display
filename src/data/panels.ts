@@ -15,9 +15,10 @@ export interface SocialPanel {
     type: "social";
     platform: SocialPlatform;
     name: string;
-    // Filled in by useSocialPanels once the live counts arrive. Panel hides the
-    // follower row while this is undefined, so there is no placeholder number.
+    // Both filled in by useSocialPanels once the live counts arrive. Panel hides
+    // each row while its value is undefined, so there are no placeholder numbers.
     followers?: number;
+    likes?: number;
     url: string;
     qrColor: string;
 }
@@ -79,15 +80,17 @@ export function useSocialPanels(): SocialPanel[] {
             .then((stats) => {
                 if (!active) return;
 
-                const followersByPlatform = new Map(
-                    stats.map((stat) => [stat.platform, stat.followers]),
-                );
+                const byPlatform = new Map(stats.map((stat) => [stat.platform, stat]));
 
                 setPanels(
-                    socialPanels.map((panel) => ({
-                        ...panel,
-                        followers: followersByPlatform.get(panel.platform) || undefined,
-                    })),
+                    socialPanels.map((panel) => {
+                        const stat = byPlatform.get(panel.platform);
+                        return {
+                            ...panel,
+                            followers: stat?.followers || undefined,
+                            likes: stat?.likes || undefined,
+                        };
+                    }),
                 );
             })
             .catch((err) => {

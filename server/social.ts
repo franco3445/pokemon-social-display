@@ -2,8 +2,8 @@ import { existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { TikTokClient } from "@ssut/tiktok-api";
 
 /**
- * Follower-count reads for every platform, shared by the Vite dev middleware
- * and the Netlify function so the logic exists once.
+ * Follower and like counts for every platform, shared by the Vite dev
+ * middleware and the Netlify function so the logic exists once.
  *
  * `env` is passed in rather than read from process.env directly, because in dev
  * it comes from Vite's loadEnv (which reads .env) and in production it comes
@@ -16,21 +16,33 @@ export const SOCIAL_PLATFORMS: SocialPlatform[] = ["instagram", "facebook", "tik
 
 export type Env = Record<string, string | undefined>;
 
+export interface SocialCounts {
+  followers: number;
+  // Absent when the platform exposes no like total, or when fetching it failed
+  // while the follower count still succeeded.
+  likes?: number;
+}
+
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const GRAPH = "https://graph.facebook.com/v21.0";
+const IG_GRAPH = "https://graph.instagram.com/v21.0";
 // Long-lived user tokens last ~60 days; re-bootstrap well before that.
 const USER_TOKEN_TTL_MS = 50 * 24 * 60 * 60 * 1000;
+// Instagram has no total-likes field, so likes are summed over media pages.
+// The cap stops a runaway loop if paging ever misbehaves.
+const IG_MEDIA_PAGE_SIZE = 100;
+const IG_MAX_PAGES = 25;
 
 // Per-instance only. Warm serverless invocations reuse it; cold ones refill it.
-const cache = new Map<string, { followers: number; expiresAt: number }>();
+const cache = new Map<string, { counts: SocialCounts; expiresAt: number }>();
 
-async function cached(key: string, fetcher: () => Promise<number>): Promise<number> {
+async function cached(key: string, fetcher: () => Promise<SocialCounts>): Promise<SocialCounts> {
   const hit = cache.get(key);
-  if (hit && hit.expiresAt > Date.now()) return hit.followers;
+  if (hit && hit.expiresAt > Date.now()) return hit.counts;
 
-  const followers = await fetcher();
-  cache.set(key, { followers, expiresAt: Date.now() + CACHE_TTL_MS });
-  return followers;
+  const counts = await fetcher();
+  cache.set(key, { counts, expiresAt: Date.now() + CACHE_TTL_MS });
+  return counts;
 }
 
 function requireEnv(env: Env, key: string): string {
@@ -40,32 +52,75 @@ function requireEnv(env: Env, key: string): string {
 }
 
 /* ------------------------------------------------------------------ *
- * Graph API shared read.
+ * Instagram.
+ *
+ * followers_count is a plain field. Likes are not: there is no account-level
+ * total, so every media item's like_count is summed. That costs one request
+ * per 100 posts, which is why it sits behind the cache.
  * ------------------------------------------------------------------ */
 
-interface GraphResponse {
+interface IgProfileResponse {
   followers_count?: number;
-  fan_count?: number;
   error?: { message?: string };
 }
 
-async function graphFollowers(url: string, field: "followers_count" | "fan_count"): Promise<number> {
-  const response = await fetch(url);
-  const payload = (await response.json()) as GraphResponse;
+interface IgMediaResponse {
+  data?: Array<{ like_count?: number }>;
+  paging?: { next?: string };
+  error?: { message?: string };
+}
+
+async function instagramLikes(userId: string, token: string): Promise<number> {
+  let url: string | undefined =
+    `${IG_GRAPH}/${userId}/media?fields=like_count` +
+    `&limit=${IG_MEDIA_PAGE_SIZE}&access_token=${token}`;
+
+  let total = 0;
+
+  for (let page = 0; page < IG_MAX_PAGES && url; page++) {
+    const response = await fetch(url);
+    const payload = (await response.json()) as IgMediaResponse;
+
+    if (!response.ok || payload.error) {
+      throw new Error(
+        `Instagram /media ${response.status}: ${payload.error?.message ?? "unknown error"}`,
+      );
+    }
+
+    for (const media of payload.data ?? []) {
+      if (typeof media.like_count === "number") total += media.like_count;
+    }
+
+    url = payload.paging?.next;
+  }
+
+  return total;
+}
+
+async function instagramCounts(env: Env): Promise<SocialCounts> {
+  const userId = requireEnv(env, "IG_USER_ID");
+  const token = requireEnv(env, "IG_ACCESS_TOKEN");
+
+  const response = await fetch(
+    `${IG_GRAPH}/${userId}?fields=followers_count&access_token=${token}`,
+  );
+  const payload = (await response.json()) as IgProfileResponse;
 
   if (!response.ok || payload.error) {
-    throw new Error(`Graph API ${response.status}: ${payload.error?.message ?? "unknown error"}`);
+    throw new Error(`Instagram API ${response.status}: ${payload.error?.message ?? "unknown error"}`);
+  }
+  if (typeof payload.followers_count !== "number") {
+    throw new Error("No followers_count in Instagram response");
   }
 
-  const followers = payload[field];
-  if (typeof followers !== "number") {
-    throw new Error(`No ${field} in Graph API response`);
-  }
-  return followers;
+  return { followers: payload.followers_count, likes: await likesOrNothing("instagram", () => instagramLikes(userId, token)) };
 }
 
 /* ------------------------------------------------------------------ *
- * Facebook: self-maintaining Page token.
+ * Facebook.
+ *
+ * fan_count is the page like count and followers_count the follower count.
+ * Facebook merged the two concepts, so for most pages they are identical.
  *
  * Two ways in, in precedence order:
  *
@@ -79,6 +134,12 @@ async function graphFollowers(url: string, field: "followers_count" | "fan_count
  *    serverless host: /tmp is ephemeral, so every cold start re-bootstraps,
  *    and a short-lived seed will have expired long before.
  * ------------------------------------------------------------------ */
+
+interface FbPageResponse {
+  fan_count?: number;
+  followers_count?: number;
+  error?: { message?: string };
+}
 
 interface FbTokenStore {
   pageId: string;
@@ -100,10 +161,6 @@ interface FbAccountsResponse {
 function tokenStorePath(env: Env): string {
   if (env.FB_TOKEN_STORE) return env.FB_TOKEN_STORE;
   return env.NETLIFY ? "/tmp/fb-token.json" : ".fb-token.json";
-}
-
-function fanCountUrl(pageId: string, token: string): string {
-  return `${GRAPH}/${pageId}?fields=fan_count&access_token=${token}`;
 }
 
 function readFbToken(env: Env, pageId: string): string | null {
@@ -177,7 +234,7 @@ async function bootstrapFbPageToken(env: Env, pageId: string): Promise<string> {
   }
 
   // Fallback: the Page was not opted in to the app, so no Page token exists for
-  // it. The user token still reads fan_count, it just expires, so cache it with
+  // it. The user token still reads the counts, it just expires, so cache it with
   // a date. Opting the Page in upgrades this on the next bootstrap.
   const visible = payload.data.map((entry) => `${entry.name} (${entry.id})`).join(", ") || "none";
   console.warn(
@@ -194,22 +251,42 @@ async function bootstrapFbPageToken(env: Env, pageId: string): Promise<string> {
   return userToken;
 }
 
-async function facebookFollowers(env: Env): Promise<number> {
+async function readFacebookPage(pageId: string, token: string): Promise<SocialCounts> {
+  const response = await fetch(
+    `${GRAPH}/${pageId}?fields=fan_count,followers_count&access_token=${token}`,
+  );
+  const payload = (await response.json()) as FbPageResponse;
+
+  if (!response.ok || payload.error) {
+    throw new Error(`Graph API ${response.status}: ${payload.error?.message ?? "unknown error"}`);
+  }
+
+  const followers = payload.followers_count ?? payload.fan_count;
+  if (typeof followers !== "number") {
+    throw new Error("No followers_count or fan_count in Graph API response");
+  }
+
+  return {
+    followers,
+    likes: typeof payload.fan_count === "number" ? payload.fan_count : undefined,
+  };
+}
+
+async function facebookCounts(env: Env): Promise<SocialCounts> {
   const pageId = requireEnv(env, "FB_PAGE_ID");
 
   // Preferred: a token that already reads the page. No exchange, no disk.
   if (env.FB_PAGE_TOKEN) {
-    return graphFollowers(fanCountUrl(pageId, env.FB_PAGE_TOKEN), "fan_count");
+    return readFacebookPage(pageId, env.FB_PAGE_TOKEN);
   }
 
   const stored = readFbToken(env, pageId);
-
   if (!stored) {
-    return graphFollowers(fanCountUrl(pageId, await bootstrapFbPageToken(env, pageId)), "fan_count");
+    return readFacebookPage(pageId, await bootstrapFbPageToken(env, pageId));
   }
 
   try {
-    return await graphFollowers(fanCountUrl(pageId, stored), "fan_count");
+    return await readFacebookPage(pageId, stored);
   } catch (err) {
     const message = (err as Error).message;
 
@@ -222,20 +299,8 @@ async function facebookFollowers(env: Env): Promise<number> {
     } catch {
       // Nothing to remove, or a read-only filesystem. Bootstrap anyway.
     }
-    return graphFollowers(fanCountUrl(pageId, await bootstrapFbPageToken(env, pageId)), "fan_count");
+    return readFacebookPage(pageId, await bootstrapFbPageToken(env, pageId));
   }
-}
-
-/* ------------------------------------------------------------------ *
- * Instagram.
- * ------------------------------------------------------------------ */
-
-function instagramFollowers(env: Env): Promise<number> {
-  return graphFollowers(
-    `https://graph.instagram.com/v21.0/${requireEnv(env, "IG_USER_ID")}` +
-      `?fields=followers_count&access_token=${requireEnv(env, "IG_ACCESS_TOKEN")}`,
-    "followers_count",
-  );
 }
 
 /* ------------------------------------------------------------------ *
@@ -249,35 +314,55 @@ function instagramFollowers(env: Env): Promise<number> {
 
 const tiktok = new TikTokClient({ region: "US" });
 
-async function tiktokFollowers(env: Env): Promise<number> {
+async function tiktokCounts(env: Env): Promise<SocialCounts> {
   const username = requireEnv(env, "TIKTOK_USERNAME");
 
-  const profile = await tiktok.getUser(username);
-  const followers = profile?.data?.userInfo?.stats?.followerCount;
+  const stats = (await tiktok.getUser(username))?.data?.userInfo?.stats;
 
-  if (typeof followers !== "number") {
+  if (typeof stats?.followerCount !== "number") {
     throw new Error(`No followerCount for "${username}" (is the profile public and the name exact?)`);
   }
-  return followers;
+
+  // heartCount is the lifetime like total across all videos.
+  return {
+    followers: stats.followerCount,
+    likes: typeof stats.heartCount === "number" ? stats.heartCount : undefined,
+  };
 }
 
 /* ------------------------------------------------------------------ *
  * Entry point.
  * ------------------------------------------------------------------ */
 
+/**
+ * Likes are a nice-to-have: a platform that returns a follower count but fails
+ * on likes should still render its panel rather than reporting total failure.
+ */
+async function likesOrNothing(
+  platform: string,
+  fetcher: () => Promise<number>,
+): Promise<number | undefined> {
+  try {
+    return await fetcher();
+  } catch (err) {
+    console.warn(`[social] ${platform} likes unavailable:`, (err as Error).message);
+    return undefined;
+  }
+}
+
 export function isSocialPlatform(value: string): value is SocialPlatform {
   return (SOCIAL_PLATFORMS as string[]).includes(value);
 }
 
-export function socialFollowers(platform: SocialPlatform, env: Env): Promise<number> {
+export function socialCounts(platform: SocialPlatform, env: Env): Promise<SocialCounts> {
   switch (platform) {
     case "instagram":
-      return cached("instagram", () => instagramFollowers(env));
+      return cached("instagram", () => instagramCounts(env));
 
     case "facebook":
-      return cached("facebook", () => facebookFollowers(env));
+      return cached("facebook", () => facebookCounts(env));
 
     case "tiktok":
-      return cached("tiktok", () => tiktokFollowers(env));
+      return cached("tiktok", () => tiktokCounts(env));
   }
 }

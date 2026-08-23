@@ -1,5 +1,5 @@
 import type { Config } from "@netlify/functions";
-import { isSocialPlatform, socialFollowers } from "../../server/social.ts";
+import { isSocialPlatform, socialCounts } from "../../server/social.ts";
 
 /**
  * Production counterpart to the Vite dev middleware in vite.config.ts.
@@ -25,7 +25,7 @@ export default async (_request: Request, context: { params: { platform?: string 
   }
 
   try {
-    return json({ followers: await socialFollowers(platform, process.env) }, 200);
+    return json(await socialCounts(platform, process.env), 200);
   } catch (err) {
     console.error(`[social] ${platform} failed:`, err);
     return json({ error: (err as Error).message }, 502);

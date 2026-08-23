@@ -416,6 +416,20 @@
   margin: 12px 0 20px;
 }
 
+.panel-stats {
+  display: flex;
+
+  justify-content: center;
+
+  gap: 24px;
+
+  margin-bottom: 20px;
+}
+
+.panel-stats .followers {
+  margin-bottom: 0;
+}
+
 .followers {
   display: flex;
 

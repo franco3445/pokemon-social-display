@@ -1,6 +1,7 @@
 export interface SocialStats {
     platform: string;
     followers: number;
+    likes?: number;
 }
 
 const PLATFORMS = ["instagram", "facebook", "tiktok"] as const;
@@ -11,12 +12,12 @@ type Platform = (typeof PLATFORMS)[number];
  * called from the browser: TikTok sends no CORS headers at all, and the access
  * tokens must stay server-side regardless.
  */
-async function getFollowers(platform: Platform): Promise<number> {
+async function getCounts(platform: Platform): Promise<{ followers: number; likes?: number }> {
     const path = `/api/social/${platform}`;
     const res = await fetch(path);
     const text = await res.text();
 
-    let body: { followers?: number; error?: string };
+    let body: { followers?: number; likes?: number; error?: string };
     try {
         body = JSON.parse(text);
     } catch {
@@ -31,23 +32,26 @@ async function getFollowers(platform: Platform): Promise<number> {
     if (!res.ok || typeof body.followers !== "number") {
         throw new Error(body.error ?? `${res.status} ${res.statusText}`);
     }
-    return body.followers;
+    return { followers: body.followers, likes: body.likes };
 }
 
-export const getInstagramFollowers = (): Promise<number> => getFollowers("instagram");
-export const getFacebookFollowers = (): Promise<number> => getFollowers("facebook");
-export const getTikTokFollowers = (): Promise<number> => getFollowers("tiktok");
+export const getInstagramFollowers = async (): Promise<number> =>
+    (await getCounts("instagram")).followers;
+export const getFacebookFollowers = async (): Promise<number> =>
+    (await getCounts("facebook")).followers;
+export const getTikTokFollowers = async (): Promise<number> =>
+    (await getCounts("tiktok")).followers;
 
 export async function getAllSocialStats(): Promise<SocialStats[]> {
     // allSettled, not all: one platform being down should not blank the whole display.
-    const results = await Promise.allSettled(PLATFORMS.map(getFollowers));
+    const results = await Promise.allSettled(PLATFORMS.map(getCounts));
 
     return PLATFORMS.map((platform, i) => {
         const result = results[i];
         if (result.status === "rejected") {
-            console.error(`${platform} follower count failed:`, result.reason);
+            console.error(`${platform} counts failed:`, result.reason);
             return { platform, followers: 0 };
         }
-        return { platform, followers: result.value };
+        return { platform, followers: result.value.followers, likes: result.value.likes };
     });
 }

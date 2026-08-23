@@ -2,7 +2,7 @@ import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { isSocialPlatform, socialFollowers, SOCIAL_PLATFORMS } from "./server/social.ts";
+import { isSocialPlatform, socialCounts, SOCIAL_PLATFORMS } from "./server/social.ts";
 
 /**
  * Dev-only mirror of netlify/functions/social.ts. Both delegate to
@@ -28,7 +28,7 @@ function socialApi(env: Record<string, string>): Plugin {
             }
 
             try {
-              res.end(JSON.stringify({ followers: await socialFollowers(platform, env) }));
+              res.end(JSON.stringify(await socialCounts(platform, env)));
             } catch (err) {
               console.error(`[social] ${platform} failed:`, err);
               res.statusCode = 502;
