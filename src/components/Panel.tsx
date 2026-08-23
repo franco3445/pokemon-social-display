@@ -101,7 +101,13 @@ export default function Panel({
                 </div>
             )}
 
-            <div className="qr-container">
+            <a
+                aria-label={`Open ${getPlatformName(platform)} link for ${name}`}
+                className="qr-container"
+                href={url}
+                rel="noopener noreferrer"
+                target="_blank"
+            >
                 <QRCodeSVG
                     bgColor="#ffffff"
                     fgColor={qrColor}
@@ -109,7 +115,7 @@ export default function Panel({
                     size={150}
                     value={url}
                 />
-            </div>
+            </a>
 
             <div className="panel-name">
                 {name}

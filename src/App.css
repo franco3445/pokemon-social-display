@@ -463,6 +463,43 @@
 
   box-shadow:
           0 5px 0 #040b10;
+
+  text-decoration: none;
+
+  transition:
+          transform 0.12s ease,
+          box-shadow 0.12s ease;
+}
+
+.qr-container:hover {
+  transform: translateY(-2px);
+
+  box-shadow:
+          0 7px 0 #040b10;
+}
+
+.qr-container:active {
+  transform: translateY(3px);
+
+  box-shadow:
+          0 2px 0 #040b10;
+}
+
+.qr-container:focus-visible {
+  outline: 3px solid #65d8ff;
+
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qr-container {
+    transition: none;
+  }
+
+  .qr-container:hover,
+  .qr-container:active {
+    transform: none;
+  }
 }
 
 .panel-name {
