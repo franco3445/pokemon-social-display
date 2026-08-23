@@ -13,7 +13,6 @@ interface PanelProps {
     followers?: number;
     name: string;
     platform: string;
-    pokemon: string;
     qrColor: string;
     type: "social" | "payment";
     url: string;

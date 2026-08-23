@@ -1,0 +1,11 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Client-side routing: serve the SPA shell for anything not a real file.
+# Functions declaring a `path` in their config are matched before redirects,
+# so /api/social/* reaches the function rather than falling through to here.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
