@@ -67,10 +67,17 @@ async function graphFollowers(url: string, field: "followers_count" | "fan_count
 /* ------------------------------------------------------------------ *
  * Facebook: self-maintaining Page token.
  *
- * A Page token derived from a long-lived user token does not expire, so
- * FB_ACCESS_TOKEN is only a seed, read once to bootstrap the durable token.
- * The disk cache is best-effort: serverless filesystems are read-only apart
- * from /tmp and ephemeral even there, so losing it just costs a re-bootstrap.
+ * Two ways in, in precedence order:
+ *
+ * 1. FB_PAGE_TOKEN, used exactly as given. This is the right one for
+ *    serverless, where there is nowhere durable to cache a bootstrapped
+ *    token. Supply a Page token (never expires) or a long-lived user token
+ *    (~60 days). Nothing is exchanged and nothing is written to disk.
+ *
+ * 2. FB_ACCESS_TOKEN as a seed, exchanged for a long-lived token and then a
+ *    Page token, cached to disk. Convenient locally, but useless on a
+ *    serverless host: /tmp is ephemeral, so every cold start re-bootstraps,
+ *    and a short-lived seed will have expired long before.
  * ------------------------------------------------------------------ */
 
 interface FbTokenStore {
@@ -139,7 +146,9 @@ async function bootstrapFbPageToken(env: Env, pageId: string): Promise<string> {
       throw new Error(
         `Facebook token exchange ${response.status}: ` +
           `${payload.error?.message ?? "no access_token returned"}. ` +
-          `Set a fresh user token in FB_ACCESS_TOKEN.`,
+          `FB_ACCESS_TOKEN is a seed and has expired. On a serverless host set ` +
+          `FB_PAGE_TOKEN to a Page or long-lived user token instead, since there ` +
+          `is nowhere to cache a bootstrapped one.`,
       );
     }
     userToken = payload.access_token;
@@ -187,6 +196,12 @@ async function bootstrapFbPageToken(env: Env, pageId: string): Promise<string> {
 
 async function facebookFollowers(env: Env): Promise<number> {
   const pageId = requireEnv(env, "FB_PAGE_ID");
+
+  // Preferred: a token that already reads the page. No exchange, no disk.
+  if (env.FB_PAGE_TOKEN) {
+    return graphFollowers(fanCountUrl(pageId, env.FB_PAGE_TOKEN), "fan_count");
+  }
+
   const stored = readFbToken(env, pageId);
 
   if (!stored) {
