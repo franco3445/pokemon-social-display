@@ -5,6 +5,7 @@ import {
 } from "react-router-dom";
 
 import PokedexHeader from "./components/PokedexHeader";
+import BouncingPokeball from "./components/BouncingPokeball";
 
 import Home from "./pages/Home";
 import Socials from "./pages/Socials";
@@ -18,6 +19,8 @@ function App() {
       <BrowserRouter>
 
         <PokedexHeader />
+
+        <BouncingPokeball />
 
         <Routes>
 
