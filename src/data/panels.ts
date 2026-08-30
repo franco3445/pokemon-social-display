@@ -15,10 +15,9 @@ export interface SocialPanel {
     type: "social";
     platform: SocialPlatform;
     name: string;
-    // Both filled in by useSocialPanels once the live counts arrive. Panel hides
-    // each row while its value is undefined, so there are no placeholder numbers.
+    // Filled in by useSocialPanels once the live counts arrive. Panel hides the
+    // follower row while this is undefined, so there is no placeholder number.
     followers?: number;
-    likes?: number;
     url: string;
     qrColor: string;
 }
@@ -80,17 +79,15 @@ export function useSocialPanels(): SocialPanel[] {
             .then((stats) => {
                 if (!active) return;
 
-                const byPlatform = new Map(stats.map((stat) => [stat.platform, stat]));
+                const followersByPlatform = new Map(
+                    stats.map((stat) => [stat.platform, stat.followers]),
+                );
 
                 setPanels(
-                    socialPanels.map((panel) => {
-                        const stat = byPlatform.get(panel.platform);
-                        return {
-                            ...panel,
-                            followers: stat?.followers || undefined,
-                            likes: stat?.likes || undefined,
-                        };
-                    }),
+                    socialPanels.map((panel) => ({
+                        ...panel,
+                        followers: followersByPlatform.get(panel.platform) || undefined,
+                    })),
                 );
             })
             .catch((err) => {
@@ -113,14 +110,14 @@ export const paymentPanels: PaymentPanel[] = [
         platform: "cashapp",
         name: "$franco3445",
         url: "https://cash.app/$franco3445",
-        qrColor: "#00c244",
+        qrColor: "#006400",
     },
     {
         type: "payment",
         platform: "venmo",
         name: "@franco3445",
         url: "https://venmo.com/code?user_id=1786268014870528090",
-        qrColor: "#3d95ce",
+        qrColor: "#0000CD",
     },
     {
         type: "payment",
