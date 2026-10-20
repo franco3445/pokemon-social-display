@@ -46,6 +46,10 @@ export default function Home() {
                     FULL DISPLAY
                 </Link>
 
+                <Link to="/game" className="action-button">
+                    WHO'S THAT POKÉMON?
+                </Link>
+
             </section>
 
             <section className="preview-section">

@@ -22,6 +22,7 @@ export default function PokedexHeader() {
                 <Link to="/socials">SOCIAL</Link>
                 <Link to="/payments">PAY</Link>
                 <Link to="/display">DISPLAY</Link>
+                <Link to="/game">GAME</Link>
             </nav>
 
         </header>

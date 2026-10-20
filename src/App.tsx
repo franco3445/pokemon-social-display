@@ -12,6 +12,7 @@ import Socials from "./pages/Socials";
 import Payments from "./pages/Payments";
 import Settings from "./pages/Settings";
 import Display from "./pages/Display";
+import Game from "./pages/Game";
 
 function App() {
 
@@ -47,6 +48,11 @@ function App() {
           <Route
               path="/display"
               element={<Display />}
+          />
+
+          <Route
+              path="/game"
+              element={<Game />}
           />
 
         </Routes>
