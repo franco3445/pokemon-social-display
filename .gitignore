@@ -27,3 +27,6 @@ dist-ssr
 .env
 .env.local
 .fb-token.json
+
+# Generated brag video output
+brag-output*/
