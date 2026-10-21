@@ -27,6 +27,7 @@ dist-ssr
 .env
 .env.local
 .fb-token.json
+.ig-token.json
 
 # Generated brag video output
-brag-output*/
+brag-output/

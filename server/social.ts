@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { TikTokClient } from "@ssut/tiktok-api";
+import { getInstagramToken } from "./igToken.ts";
 
 /**
  * Follower and like counts for every platform, shared by the Vite dev
@@ -99,7 +100,8 @@ async function instagramLikes(userId: string, token: string): Promise<number> {
 
 async function instagramCounts(env: Env): Promise<SocialCounts> {
   const userId = requireEnv(env, "IG_USER_ID");
-  const token = requireEnv(env, "IG_ACCESS_TOKEN");
+  // Kept alive by igToken.ts, which renews it well before its 60-day expiry.
+  const token = await getInstagramToken(env);
 
   const response = await fetch(
     `${IG_GRAPH}/${userId}?fields=followers_count&access_token=${token}`,
@@ -107,7 +109,11 @@ async function instagramCounts(env: Env): Promise<SocialCounts> {
   const payload = (await response.json()) as IgProfileResponse;
 
   if (!response.ok || payload.error) {
-    throw new Error(`Instagram API ${response.status}: ${payload.error?.message ?? "unknown error"}`);
+    const message = payload.error?.message ?? "unknown error";
+    const hint = /expired|session/i.test(message)
+      ? " Generate a new Instagram token, set it as IG_ACCESS_TOKEN, and redeploy."
+      : "";
+    throw new Error(`Instagram API ${response.status}: ${message}${hint}`);
   }
   if (typeof payload.followers_count !== "number") {
     throw new Error("No followers_count in Instagram response");
