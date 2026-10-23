@@ -373,6 +373,20 @@
           box-shadow 0.2s ease;
 }
 
+/* Social and payment panels use a translucent backdrop so the
+   bouncing pokeball shows through. Only the
+   background has alpha; the QR code, icon, and
+   text keep full opacity. */
+.social-panel,
+.payment-panel {
+  background:
+          linear-gradient(
+                  145deg,
+                  rgba(16, 43, 61, 0.72),
+                  rgba(8, 23, 34, 0.72)
+          );
+}
+
 .pokemon-panel:hover {
   transform: translateY(-8px);
 
@@ -611,6 +625,16 @@
 
   padding: 25px;
 
+  display: flex;
+
+  flex-direction: column;
+}
+
+/* The display gradient lives on the body (not on
+   .display-page) so the bouncing pokeball can roam
+   above the backdrop while still sitting behind the
+   panels, text, and QR codes. */
+body:has(.display-page) {
   background:
           radial-gradient(
                   circle at center,
@@ -618,9 +642,7 @@
                   #050c12 80%
           );
 
-  display: flex;
-
-  flex-direction: column;
+  background-attachment: fixed;
 }
 
 .display-header {
@@ -789,11 +811,29 @@
 }
 
 /* =========================================
+   APP CONTENT LAYER
+
+   Lifts every routed page above the bouncing
+   pokeball. The wrapper itself is transparent,
+   so the ball stays visible in empty space and
+   only disappears behind real content.
+========================================= */
+
+.app-content {
+  position: relative;
+
+  z-index: 1;
+}
+
+
+/* =========================================
    BOUNCING POKEBALL
 
    DVD-logo style screen roamer. Sits above
-   the page content but below the header, and
-   never intercepts clicks.
+   the page background but behind all page
+   content (.app-content) and the header, so it
+   never covers text or QR codes or intercepts
+   clicks.
 ========================================= */
 
 .bouncing-pokeball {
@@ -809,7 +849,7 @@
 
   will-change: transform;
 
-  z-index: 5;
+  z-index: 0;
 
   filter:
           drop-shadow(0 10px 18px rgba(0, 0, 0, 0.55));

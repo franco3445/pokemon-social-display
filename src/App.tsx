@@ -23,6 +23,8 @@ function App() {
 
         <BouncingPokeball />
 
+        <div className="app-content">
+
         <Routes>
 
           <Route
@@ -56,6 +58,8 @@ function App() {
           />
 
         </Routes>
+
+        </div>
 
       </BrowserRouter>
   );
