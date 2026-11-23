@@ -28,10 +28,15 @@ const REVEAL_DELAY_MS = 150;
 const GAME_OVER_DELAY_MS = 1800;
 const CONGRATS_DELAY_MS = 1800;
 
+// Generation 0 means "any generation".
+const ANY_GEN = 0;
+const rangeFor = (gen: number): [number, number] =>
+    gen === ANY_GEN ? ALL_RANGE : rangeForGen(gen);
+
 export default function Game() {
     const [phase, setPhase] = useState<Phase>("menu");
     const [mode, setMode] = useState<Mode>("free");
-    const [generation, setGeneration] = useState(1);
+    const [generation, setGeneration] = useState(ANY_GEN);
 
     const [pokemon, setPokemon] = useState<Pokemon | null>(null);
     const [loading, setLoading] = useState(false);
@@ -47,7 +52,7 @@ export default function Game() {
     const timers = useRef<number[]>([]);
     const audio = useRef<HTMLAudioElement | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
-    const currentRange = useRef<[number, number]>(rangeForGen(1));
+    const currentRange = useRef<[number, number]>(ALL_RANGE);
     const nextId = useRef<number | null>(null);
 
     /* ---------- timers & audio, all cleaned up on unmount ---------- */
@@ -164,7 +169,7 @@ export default function Game() {
         setMode("free");
         setScore(0);
         setPhase("playing");
-        loadPokemon(rangeForGen(generation));
+        loadPokemon(rangeFor(generation));
     };
 
     const startQuiz = () => {
@@ -191,7 +196,7 @@ export default function Game() {
 
     const changeGeneration = (gen: number) => {
         setGeneration(gen);
-        loadPokemon(rangeForGen(gen));
+        loadPokemon(rangeFor(gen));
     };
 
     const submitGuess = () => {
@@ -423,6 +428,7 @@ export default function Game() {
                                 value={generation}
                                 onChange={(e) => changeGeneration(Number(e.target.value))}
                             >
+                                <option value={ANY_GEN}>All Generations</option>
                                 {REGIONS.map((r) => (
                                     <option key={r.gen} value={r.gen}>
                                         Gen {r.gen} ({r.name})
