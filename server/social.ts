@@ -24,7 +24,7 @@ export interface SocialCounts {
   likes?: number;
 }
 
-const CACHE_TTL_MS = 10 * 60 * 1000;
+const CACHE_TTL_MS = 60 * 1000;
 const GRAPH = "https://graph.facebook.com/v21.0";
 const IG_GRAPH = "https://graph.instagram.com/v21.0";
 // Long-lived user tokens last ~60 days; re-bootstrap well before that.

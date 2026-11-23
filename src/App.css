@@ -466,6 +466,113 @@
   font-size: 8px;
 }
 
+/* Live count change: the number pops and glows, and a "+N" floats up. */
+
+.stat {
+  position: relative;
+}
+
+.stat-value {
+  display: inline-block;
+}
+
+.stat-up {
+  --stat-color: #7dff8a;
+}
+
+.stat-down {
+  --stat-color: #ff6b6b;
+}
+
+.stat-pop {
+  animation: stat-pop 900ms cubic-bezier(0.2, 0.9, 0.3, 1.4);
+}
+
+.stat-delta {
+  position: absolute;
+
+  bottom: calc(100% + 2px);
+  left: 50%;
+
+  padding: 4px 6px;
+
+  background: rgba(4, 11, 16, 0.9);
+
+  border: 2px solid var(--stat-color);
+
+  box-shadow: 0 0 10px var(--stat-color);
+
+  color: var(--stat-color);
+
+  font-size: 10px;
+  font-style: normal;
+
+  white-space: nowrap;
+
+  pointer-events: none;
+
+  opacity: 0;
+
+  animation: stat-delta 2.2s ease-out forwards;
+}
+
+@keyframes stat-pop {
+  0% {
+    transform: scale(1);
+  }
+
+  25% {
+    transform: scale(1.35);
+
+    color: var(--stat-color);
+
+    text-shadow:
+            0 0 10px var(--stat-color),
+            0 0 22px var(--stat-color);
+  }
+
+  100% {
+    transform: scale(1);
+
+    color: #ffffff;
+
+    text-shadow: none;
+  }
+}
+
+@keyframes stat-delta {
+  0% {
+    opacity: 0;
+
+    transform: translate(-50%, 10px) scale(0.6);
+  }
+
+  15% {
+    opacity: 1;
+
+    transform: translate(-50%, -4px) scale(1.15);
+  }
+
+  70% {
+    opacity: 1;
+
+    transform: translate(-50%, -12px) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+
+    transform: translate(-50%, -20px) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stat-pop,
+  .stat-delta {
+    animation: none;
+  }
+}
+
 .qr-container {
   display: inline-flex;
 

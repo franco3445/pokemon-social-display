@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 
 import { QRCodeSVG } from "qrcode.react";
+import { useEffect, useRef, useState } from "react";
 
 interface PanelProps {
     followers?: number;
@@ -54,6 +55,89 @@ function getPlatformName(platform: string) {
     }
 }
 
+
+const COUNT_DURATION_MS = 1400;
+
+/**
+ * Tweens the displayed number from whatever it currently shows to `target`,
+ * easing out so it rolls quickly then settles. Jumps straight there when the
+ * viewer prefers reduced motion.
+ */
+function useCountUp(target: number) {
+    const [display, setDisplay] = useState(target);
+    const displayRef = useRef(target);
+
+    useEffect(() => {
+        const from = displayRef.current;
+        if (from === target) return;
+
+        const reduced = window.matchMedia(
+            "(prefers-reduced-motion: reduce)",
+        ).matches;
+        const duration = reduced ? 0 : COUNT_DURATION_MS;
+        const startedAt = performance.now();
+        let frame = 0;
+
+        const tick = (now: number) => {
+            const t = duration > 0 ? Math.min((now - startedAt) / duration, 1) : 1;
+            const eased = 1 - Math.pow(1 - t, 3);
+            const value = Math.round(from + (target - from) * eased);
+
+            displayRef.current = value;
+            setDisplay(value);
+
+            if (t < 1) frame = requestAnimationFrame(tick);
+        };
+
+        frame = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(frame);
+    }, [target]);
+
+    return display;
+}
+
+interface StatChange {
+    delta: number;
+    // Bumped on every change so the animated elements remount and replay.
+    id: number;
+}
+
+function AnimatedStat({ value, label }: { value: number; label: string }) {
+    const display = useCountUp(value);
+
+    // Track the previous value during render (React's recommended pattern for
+    // reacting to a prop change) so the delta is known on the same render.
+    const [prevValue, setPrevValue] = useState(value);
+    const [change, setChange] = useState<StatChange | null>(null);
+
+    if (value !== prevValue) {
+        setPrevValue(value);
+        setChange({ delta: value - prevValue, id: (change?.id ?? 0) + 1 });
+    }
+
+    const direction = change ? (change.delta > 0 ? "up" : "down") : "";
+
+    return (
+        <div className={`followers stat ${direction && `stat-${direction}`}`}>
+            <strong
+                className={change ? "stat-value stat-pop" : "stat-value"}
+                key={`value-${change?.id ?? 0}`}
+            >
+                {display.toLocaleString()}
+            </strong>
+
+            <span>{label}</span>
+
+            {change && (
+                <em aria-hidden="true" className="stat-delta" key={`delta-${change.id}`}>
+                    {change.delta > 0 ? "+" : "−"}
+                    {Math.abs(change.delta).toLocaleString()}
+                </em>
+            )}
+        </div>
+    );
+}
+
 export default function Panel({
     platform,
     name,
@@ -79,23 +163,11 @@ export default function Panel({
                 <div className="panel-stats">
 
                     {followers !== undefined && (
-                        <div className="followers">
-                            <strong>
-                                {followers.toLocaleString()}
-                            </strong>
-
-                            <span>FOLLOWERS</span>
-                        </div>
+                        <AnimatedStat label="FOLLOWERS" value={followers} />
                     )}
 
                     {likes !== undefined && (
-                        <div className="followers">
-                            <strong>
-                                {likes.toLocaleString()}
-                            </strong>
-
-                            <span>LIKES</span>
-                        </div>
+                        <AnimatedStat label="LIKES" value={likes} />
                     )}
 
                 </div>
